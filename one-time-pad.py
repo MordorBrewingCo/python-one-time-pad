@@ -22,6 +22,8 @@ def get_api_key():
 
 def generate_one_time_pad(size, api_key):
     # URL for random.org's integer generation API
+    # For free usage key, maximum of 10,000 integers per request.
+    # Each integer can range from 0 to 255 if generating random bytes, so a single request could yield up to 10,000 bytes (10 KB).
     url = "https://api.random.org/json-rpc/4/invoke"
 
     # Prepare the API request payload
