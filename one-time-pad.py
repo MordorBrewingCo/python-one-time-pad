@@ -160,7 +160,7 @@ def generate_pad_randomorg(nbytes: int, api_key: str) -> bytes:
             ints = rndorg_generate_integers(s, api_key, need)
             if len(ints) != need:
                 raise RuntimeError("random.org returned unexpected count")
-            out[idx : idx + need] = bytes(ints)
+            out[idx: idx + need] = bytes(ints)
             idx += need
     return bytes(out)
 
@@ -198,7 +198,7 @@ def stream_encrypt(in_path: Path, pad_path: Path, out_path: Path, offset: int, b
                     chunk = fin.read(CHUNK)
                     if not chunk:
                         break
-                    pad_chunk = pad_bytes[offset + written : offset + written + len(chunk)]
+                    pad_chunk = pad_bytes[offset + written: offset + written + len(chunk)]
                     enc = xor_bytes(chunk, pad_chunk)
                     # write as CSV progressively
                     csv = ",".join(str(b) for b in enc)
@@ -215,14 +215,14 @@ def stream_encrypt(in_path: Path, pad_path: Path, out_path: Path, offset: int, b
                     chunk = fin.read(CHUNK)
                     if not chunk:
                         break
-                    pad_chunk = pad_bytes[offset + written : offset + written + len(chunk)]
+                    pad_chunk = pad_bytes[offset + written: offset + written + len(chunk)]
                     fout.write(xor_bytes(chunk, pad_chunk))
                     written += len(chunk)
 
         used = total
         if burn:
             # Remove first offset+used bytes
-            remaining = pad_bytes[offset + used :]
+            remaining = pad_bytes[offset + used:]
             save_bytes_auto(pad_path, remaining)  # keeps CSV format for .txt
             if verbose:
                 print(f"Burned {offset + used} bytes from pad {pad_path}")
@@ -290,18 +290,78 @@ def stream_encrypt(in_path: Path, pad_path: Path, out_path: Path, offset: int, b
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="One-Time Pad Encryption Program (streamed & safer)")
-    parser.add_argument("-p", "--pad", type=int, help="Generate a one-time pad of the specified size in bytes")
-    parser.add_argument("-e", "--encrypt", action="store_true", help="Encrypt infile using padfile")
-    parser.add_argument("-d", "--decrypt", action="store_true", help="Decrypt infile using padfile")
-    parser.add_argument("--padfile", default="pad.txt", help="Pad file path (default: pad.txt). Use .bin for binary.")
-    parser.add_argument("--infile", default=None, help="Input file (encrypt default: unencrypted.txt; decrypt default: message.txt)")
-    parser.add_argument("--outfile", default=None, help="Output file (encrypt default: message.txt; decrypt default: decrypted_message.txt)")
-    parser.add_argument("--source", choices=["local", "randomorg"], default="local", help="Randomness source for pad generation (default: local)")
-    parser.add_argument("--api-key", default=None, help="Random.org API key (or set env RANDOM_ORG_API_KEY)")
-    parser.add_argument("--offset", type=int, default=0, help="Byte offset into pad before use (default: 0)")
-    parser.add_argument("--burn", action="store_true", help="After use, remove consumed pad bytes (including offset) to prevent reuse")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    parser = argparse.ArgumentParser(
+        prog="otp.py",
+        description=(
+            "One-Time Pad Encryption Program (streamed & safer).\n\n"
+            "This tool can:\n"
+            "  • Generate one-time pads using either local CSPRNG (default) or random.org\n"
+            "  • Encrypt any file with a pad (XOR operation)\n"
+            "  • Decrypt a ciphertext with the same pad\n\n"
+            "Pad files and ciphertexts can be stored either as raw binary (.bin) or as CSV of integers (.txt) "
+            "for legacy compatibility. If the filename ends in .txt, CSV format is used; otherwise raw bytes."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  Generate a 1 MB binary pad with local randomness:\n"
+            "    python3 otp.py -p 1048576 --padfile pad.bin -v\n\n"
+            "  Generate a 64 KB pad from random.org:\n"
+            "    export RANDOM_ORG_API_KEY=your_key_here\n"
+            "    python3 otp.py -p 65536 --source randomorg --padfile pad.bin\n\n"
+            "  Encrypt with a pad (and burn used bytes so they can't be reused):\n"
+            "    python3 otp.py -e --infile secret.pdf --padfile pad.bin --outfile cipher.bin --burn\n\n"
+            "  Decrypt back:\n"
+            "    python3 otp.py -d --infile cipher.bin --padfile pad.bin --outfile recovered.pdf"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    parser.add_argument(
+        "-p", "--pad", type=int,
+        help="Generate a one-time pad of the specified size in bytes. "
+             "Default randomness source is local os.urandom unless --source randomorg is given."
+    )
+    parser.add_argument(
+        "-e", "--encrypt", action="store_true",
+        help="Encrypt infile using padfile (default infile: unencrypted.txt; default outfile: message.txt)."
+    )
+    parser.add_argument(
+        "-d", "--decrypt", action="store_true",
+        help="Decrypt infile using padfile (default infile: message.txt; default outfile: decrypted_message.txt)."
+    )
+    parser.add_argument(
+        "--padfile", default="pad.txt",
+        help="Path to pad file (default: pad.txt). Extension decides format: .txt = CSV integers, others = binary."
+    )
+    parser.add_argument(
+        "--infile", default=None,
+        help="Input file. Default depends on mode: unencrypted.txt for encryption, message.txt for decryption."
+    )
+    parser.add_argument(
+        "--outfile", default=None,
+        help="Output file. Default depends on mode: message.txt for encryption, decrypted_message.txt for decryption."
+    )
+    parser.add_argument(
+        "--source", choices=["local", "randomorg"], default="local",
+        help="Randomness source when generating pads (default: local CSPRNG)."
+    )
+    parser.add_argument(
+        "--api-key", default=None,
+        help="Random.org API key (or set via env RANDOM_ORG_API_KEY). If not provided, "
+             "falls back to key.txt file or interactive prompt."
+    )
+    parser.add_argument(
+        "--offset", type=int, default=0,
+        help="Byte offset into the pad before starting use (default: 0). Useful for partial pad reuse."
+    )
+    parser.add_argument(
+        "--burn", action="store_true",
+        help="After use, remove consumed pad bytes (including any offset) to prevent reuse."
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Verbose output with details of operations performed."
+    )
 
     args = parser.parse_args()
 
@@ -329,17 +389,20 @@ def main() -> None:
         if args.encrypt:
             in_path = Path(args.infile or "unencrypted.txt")
             out_path = Path(args.outfile or "message.txt")
-            processed = stream_encrypt(in_path, pad_path, out_path, offset=args.offset, burn=args.burn, verbose=args.verbose)
+            processed = stream_encrypt(in_path, pad_path, out_path, offset=args.offset, burn=args.burn,
+                                       verbose=args.verbose)
             if args.verbose:
                 print(f"Encrypted {processed} bytes -> {out_path}")
             else:
-                print(f"Message encrypted and saved to {out_path}{' (CSV integers)' if is_text_format(out_path) else ''}.")
+                print(
+                    f"Message encrypted and saved to {out_path}{' (CSV integers)' if is_text_format(out_path) else ''}.")
             return
 
         if args.decrypt:
             in_path = Path(args.infile or "message.txt")
             out_path = Path(args.outfile or "decrypted_message.txt")
-            processed = stream_encrypt(in_path, pad_path, out_path, offset=args.offset, burn=args.burn, verbose=args.verbose)
+            processed = stream_encrypt(in_path, pad_path, out_path, offset=args.offset, burn=args.burn,
+                                       verbose=args.verbose)
             if args.verbose:
                 print(f"Decrypted {processed} bytes -> {out_path}")
             else:
